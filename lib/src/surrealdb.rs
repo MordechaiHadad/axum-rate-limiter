@@ -25,6 +25,11 @@ struct SurrealCount {
 }
 
 impl SurrealRateLimiter {
+    /// Create and initialize a `SurrealRateLimiter`.
+    ///
+    /// This executes any required migration/initialization queries to ensure the
+    /// `rate_limits` table and its fields exist, then returns a limiter backed by
+    /// the provided SurrealDB instance.
     pub async fn new(db: Surreal<Db>) -> Self {
         db.query(
             "
@@ -45,6 +50,12 @@ impl SurrealRateLimiter {
 }
 
 impl RateLimiter for SurrealRateLimiter {
+    /// Determine whether the given identifier (usually an IP address) is allowed.
+    ///
+    /// Returns `true` when the identifier is within the configured rate limits,
+    /// and `false` when the rate limit has been exceeded. This function will
+    /// create a record for the identifier if one does not yet exist and will
+    /// reset the counter when the expiry has passed.
     async fn allow(&self, identifier: &str) -> bool {
         trace!("allow check started for {}", identifier);
         let now = jiff::Timestamp::now();
@@ -103,6 +114,9 @@ impl RateLimiter for SurrealRateLimiter {
         true
     }
 
+    /// Remove expired entries from the rate limits table.
+    ///
+    /// This performs a delete query to remove records whose expiry time is in the past.
     async fn cleanup(&self) {
         trace!("running surrealdb cleanup");
         self.db
@@ -112,6 +126,10 @@ impl RateLimiter for SurrealRateLimiter {
         debug!("surrealdb cleanup completed");
     }
 
+    /// Return the number of stored rate limit entries.
+    ///
+    /// Queries the database for the total count of records in the `rate_limits`
+    /// table and returns that value as a `usize`.
     async fn len(&self) -> usize {
         trace!("counting rate limits");
         let mut response = self

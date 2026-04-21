@@ -18,6 +18,10 @@ pub struct InMemoryLimiter {
 }
 
 impl InMemoryLimiter {
+    /// Create a new `InMemoryLimiter`.
+    ///
+    /// This initializes the internal data store used to track per-identifier
+    /// request counts and expiration timestamps.
     fn new() -> InMemoryLimiter {
         trace!("Initializing in-memory rate limiter");
         debug!("InMemoryLimiter created with empty data store");
@@ -28,6 +32,11 @@ impl InMemoryLimiter {
 }
 
 impl RateLimiter for InMemoryLimiter {
+    /// Determine whether the given `identifier` is allowed to make a request.
+    ///
+    /// If the identifier has remaining allowance, this increments the stored
+    /// attempt count and returns `true`. If the rate limit has been reached,
+    /// returns `false`. Expired counters are reset automatically.
     async fn allow(&self, identifier: &str) -> bool {
         trace!("allow called for identifier: {}", identifier);
         let mut lock_guard = self.data.lock().unwrap();
@@ -63,6 +72,11 @@ impl RateLimiter for InMemoryLimiter {
         true
     }
 
+    /// Remove expired entries from the in-memory store.
+    ///
+    /// Attempts to acquire a non-blocking lock and deletes entries whose expiry
+    /// timestamps are before the current time. If the lock cannot be acquired,
+    /// the cleanup is skipped.
     async fn cleanup(&self) {
         trace!("cleanup called");
         let now = jiff::Timestamp::now();
@@ -76,6 +90,10 @@ impl RateLimiter for InMemoryLimiter {
         }
     }
 
+    /// Return the number of tracked identifiers currently stored.
+    ///
+    /// This acquires a lock to read the current number of entries in the
+    /// internal data store.
     async fn len(&self) -> usize {
         let lock = self.data.lock().unwrap();
         let l = lock.len();
