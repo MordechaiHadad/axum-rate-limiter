@@ -1,0 +1,11 @@
+[workspace]
+members = ["server", "lib"]
+default-members = ["server"]
+resolver = "3"
+
+[workspace.dependencies]
+axum = { version = "0.8.4", features = ["multipart"] }
+tokio = { version = "1.45.1", features = ["full"] }
+surrealdb = { version = "3.0.5", default-features = false, features = ["kv-mem", "rustls"] }
+jiff = "0.2.23"
+tracing = "0.1.44"
