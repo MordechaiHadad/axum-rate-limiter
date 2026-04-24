@@ -6,6 +6,17 @@ edition = "2024"
 [dependencies]
 axum.workspace = true
 tokio.workspace = true
-surrealdb.workspace = true
 jiff.workspace = true
-axum-rate-limiter = { path = "../lib", features = ["surrealdb"] }
+tracing.workspace = true
+tracing-subscriber = "0.3.23"
+
+surrealdb = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+
+axum-rate-limiter = { path = "../lib", default-features = false }
+
+[features]
+default = []
+all = ["surrealdb", "redis"]
+surrealdb = ["dep:surrealdb", "axum-rate-limiter/surrealdb"]
+redis = ["dep:redis", "axum-rate-limiter/redis"]

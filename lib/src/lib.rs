@@ -1,4 +1,6 @@
-pub mod memory;
+pub mod hashmap;
+#[cfg(feature = "redis")]
+pub mod redis;
 #[cfg(feature = "surrealdb")]
 pub mod surrealdb;
 
@@ -13,6 +15,8 @@ use axum::{
 use axum_client_ip::ClientIp;
 use tracing::{debug, trace};
 
+const RATE_LIMIT_MAX: i32 = 3;
+
 /// Trait representing a rate limiter backend.
 ///
 /// Implementors decide whether an identifier (usually an IP) is allowed to make
@@ -26,7 +30,9 @@ pub trait RateLimiter: Send + Sync {
         std::future::ready(())
     }
     /// Return the number of tracked entries currently held by the limiter.
-    fn len(&self) -> impl std::future::Future<Output = usize> + Send;
+    fn len(&self) -> impl std::future::Future<Output = usize> + Send {
+        std::future::ready(0)
+    }
     /// Return true when there are no tracked entries.
     fn is_empty(&self) -> impl std::future::Future<Output = bool> + Send {
         async { self.len().await == 0 }

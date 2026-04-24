@@ -9,3 +9,4 @@ tokio = { version = "1.45.1", features = ["full"] }
 surrealdb = { version = "3.0.5", default-features = false, features = ["kv-mem", "rustls"] }
 jiff = "0.2.23"
 tracing = "0.1.44"
+redis = { version = "1.2.0", features = ["tokio-comp"] }

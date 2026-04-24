@@ -3,9 +3,7 @@ use std::{collections::HashMap, sync::Mutex};
 use jiff::{Timestamp, ToSpan};
 use tracing::{debug, trace};
 
-use crate::RateLimiter;
-
-const RATE_LIMIT_MAX: i32 = 5;
+use crate::{RATE_LIMIT_MAX, RateLimiter};
 
 #[derive(Debug)]
 struct LimitData {
@@ -13,6 +11,7 @@ struct LimitData {
     expiry: Timestamp,
 }
 
+#[derive(Debug, Default)]
 pub struct InMemoryLimiter {
     data: Mutex<HashMap<String, LimitData>>,
 }
@@ -22,7 +21,7 @@ impl InMemoryLimiter {
     ///
     /// This initializes the internal data store used to track per-identifier
     /// request counts and expiration timestamps.
-    fn new() -> InMemoryLimiter {
+    pub fn new() -> InMemoryLimiter {
         trace!("Initializing in-memory rate limiter");
         debug!("InMemoryLimiter created with empty data store");
         InMemoryLimiter {
@@ -44,8 +43,9 @@ impl RateLimiter for InMemoryLimiter {
 
         let data = lock_guard
             .entry(identifier.to_string())
+            .and_modify(|data| data.tries += 1)
             .or_insert(LimitData {
-                tries: 0,
+                tries: 1,
                 expiry: now + 60.seconds(),
             });
 
@@ -55,20 +55,18 @@ impl RateLimiter for InMemoryLimiter {
         );
 
         if now > data.expiry {
+            data.tries = 1;
             data.expiry = now + 60.seconds();
-            data.tries = 0;
             debug!("resetting limit for {}", identifier);
             return true;
         }
 
-        if data.tries >= RATE_LIMIT_MAX {
+        if data.tries > RATE_LIMIT_MAX {
             debug!("rate limit exceeded for {}", identifier);
             return false;
         }
 
-        data.expiry = now + 60.seconds();
-        data.tries += 1;
-        debug!("allowing request for {} (tries={})", identifier, data.tries);
+        debug!("allowing request for {identifier} (tries={})", data.tries);
         true
     }
 

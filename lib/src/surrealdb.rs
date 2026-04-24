@@ -3,11 +3,9 @@ use surrealdb::engine::local::Db;
 use surrealdb::types::{RecordId, SurrealValue};
 use tracing::{debug, trace};
 
-use crate::RateLimiter;
+use crate::{RATE_LIMIT_MAX, RateLimiter};
 
-const RATE_LIMIT_MAX: i32 = 3;
-
-pub struct SurrealRateLimiter {
+pub struct SurrealLimiter {
     db: Surreal<Db>,
 }
 
@@ -16,7 +14,6 @@ struct SurrealLimitEntry {
     id: RecordId,
     tries: i32,
     expiry: surrealdb::types::Datetime,
-    ip: String,
 }
 
 #[derive(Debug, SurrealValue, Clone)]
@@ -24,7 +21,7 @@ struct SurrealCount {
     count: i64,
 }
 
-impl SurrealRateLimiter {
+impl SurrealLimiter {
     /// Create and initialize a `SurrealRateLimiter`.
     ///
     /// This executes any required migration/initialization queries to ensure the
@@ -32,10 +29,9 @@ impl SurrealRateLimiter {
     /// the provided SurrealDB instance.
     pub async fn new(db: Surreal<Db>) -> Self {
         db.query(
-            "
+            r"
             BEGIN TRANSACTION;
             DEFINE TABLE IF NOT EXISTS rate_limits SCHEMAFULL;
-            DEFINE FIELD ip ON rate_limits TYPE string;
             DEFINE FIELD tries ON rate_limits TYPE int;
             DEFINE FIELD expiry ON rate_limits TYPE datetime;
             DEFINE INDEX limits_count ON rate_limits COUNT;
@@ -45,11 +41,11 @@ impl SurrealRateLimiter {
         .await
         .unwrap();
         trace!("Initialized SurrealDB rate limiter");
-        SurrealRateLimiter { db }
+        SurrealLimiter { db }
     }
 }
 
-impl RateLimiter for SurrealRateLimiter {
+impl RateLimiter for SurrealLimiter {
     /// Determine whether the given identifier (usually an IP address) is allowed.
     ///
     /// Returns `true` when the identifier is within the configured rate limits,
@@ -58,58 +54,43 @@ impl RateLimiter for SurrealRateLimiter {
     /// reset the counter when the expiry has passed.
     async fn allow(&self, identifier: &str) -> bool {
         trace!("allow check started for {}", identifier);
-        let now = jiff::Timestamp::now();
+        let id = RecordId::new("rate_limits", identifier.to_string());
         let mut response = self
             .db
             .query(
-                "
+                r"
                 {
-                LET $result = (SELECT * FROM rate_limits WHERE ip = $ip)[0];
-                LET $new_result = IF $result IS NONE {
-                    (CREATE rate_limits CONTENT { ip: $ip, tries: 0, expiry: time::now() + 60s })[0]
-                } ELSE {
-                    $result
-                };
-                RETURN $new_result;
+                LET $now = time::now();
+                UPSERT $id
+                SET
+                    tries = IF expiry < $now { 1 } ELSE { tries + 1 },
+                    expiry = IF expiry < $now { time::now() + 60s } ELSE { expiry }
+                RETURN AFTER;
                 };
                 ",
             )
-            .bind(("ip", identifier.to_owned()))
+            .bind(("id", id))
             .await
             .unwrap();
 
-        let result: Option<SurrealLimitEntry> = response.take(0).unwrap();
+        let result: Option<SurrealLimitEntry> = match response.take(0) {
+            Ok(v) => v,
+            Err(e) => {
+                debug!("error taking query result for {}: {:?}", identifier, e);
+                return false;
+            }
+        };
 
         let entry = result.unwrap();
         debug!("loaded entry for {}: {:?}", identifier, entry);
-        let entry_expiry = jiff::Timestamp::from_second(entry.expiry.timestamp()).unwrap();
-        if now > entry_expiry {
-            debug!("entry expired for {}, resetting tries", identifier);
-            self.db
-                .query("UPDATE $id SET tries = 0, expiry = time::now() + 60s")
-                .bind(("id", entry.id))
-                .await
-                .unwrap();
-            return true;
-        }
 
-        if entry.tries >= RATE_LIMIT_MAX {
+        if entry.tries > RATE_LIMIT_MAX {
             debug!(
                 "rate limit exceeded for {} (tries={})",
                 identifier, entry.tries
             );
             return false;
         }
-
-        debug!(
-            "incrementing tries for {} (tries={})",
-            identifier, entry.tries
-        );
-        self.db
-            .query("UPDATE $id SET tries += 1, expiry = time::now() + 60s")
-            .bind(("id", entry.id))
-            .await
-            .unwrap();
 
         true
     }
