@@ -1,6 +1,6 @@
 # axum-rate-limiter
 
-Minimal rate-limiting middleware for Axum.
+Minimal rate-limiting middleware for Axum, created as PROOF OF CONCEPT for using SurrealDB as a backend, but designed to be flexible and extensible.
 
 ## Trait
 
