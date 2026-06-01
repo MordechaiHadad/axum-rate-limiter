@@ -1,5 +1,4 @@
 use axum::{Router, middleware, routing::get};
-use axum_rate_limiter::{RateLimiter, rate_limit_middleware};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tracing::info;
 
@@ -17,12 +16,12 @@ cfg_select! {
     }
 
     feature = "redis" => {
-        type LimiterImpl = axum_rate_limiter::redis::RedisLimiter;
+        type LimiterImpl = axum_rate_limiter::redis::RedisAiLimiter;
 
         async fn build_limiter() -> Arc<LimiterImpl> {
             let client = redis::Client::open("redis://127.0.0.1/").unwrap();
             let con = client.get_multiplexed_async_connection().await.unwrap();
-            Arc::new(axum_rate_limiter::redis::RedisLimiter::new(con))
+            Arc::new(axum_rate_limiter::redis::RedisAiLimiter::new(con))
         }
     }
 
@@ -48,21 +47,12 @@ async fn main() {
         let interval = Duration::from_secs(60);
         loop {
             tokio::time::sleep(interval).await;
-            info!(
-                "rate limiting storage size: {}",
-                limiter_cleanup.len().await
-            );
-            limiter_cleanup.cleanup().await;
+            info!("rate limiting storage size: {}", limiter_len(&limiter_cleanup).await);
+            limiter_cleanup_task(&limiter_cleanup).await;
         }
     });
 
-    let app = Router::new()
-        .route("/", get(|| async { "Hello, world!" }))
-        .layer(middleware::from_fn_with_state(
-            limiter,
-            rate_limit_middleware,
-        ))
-        .with_state(());
+    let app = build_app(limiter);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     info!("starting at {}", listener.local_addr().unwrap());
@@ -72,4 +62,46 @@ async fn main() {
     )
     .await
     .unwrap()
+}
+
+cfg_select! {
+    feature = "redis" => {
+        fn build_app(limiter: Arc<LimiterImpl>) -> Router {
+            Router::new()
+                .route("/", get(|| async { "Hello, world!" }))
+                .layer(middleware::from_fn_with_state(
+                    limiter,
+                    axum_rate_limiter::ai_rate_limit_middleware,
+                ))
+                .with_state(())
+        }
+
+        async fn limiter_len(limiter: &Arc<LimiterImpl>) -> usize {
+            limiter.len().await
+        }
+
+        async fn limiter_cleanup_task(limiter: &Arc<LimiterImpl>) {
+            limiter.cleanup().await;
+        }
+    }
+
+    _ => {
+        fn build_app(limiter: Arc<LimiterImpl>) -> Router {
+            Router::new()
+                .route("/", get(|| async { "Hello, world!" }))
+                .layer(middleware::from_fn_with_state(
+                    limiter,
+                    axum_rate_limiter::rate_limit_middleware::<LimiterImpl>,
+                ))
+                .with_state(())
+        }
+
+        async fn limiter_len(limiter: &Arc<LimiterImpl>) -> usize {
+            axum_rate_limiter::RateLimiter::len(&**limiter).await
+        }
+
+        async fn limiter_cleanup_task(limiter: &Arc<LimiterImpl>) {
+            axum_rate_limiter::RateLimiter::cleanup(&**limiter).await;
+        }
+    }
 }
