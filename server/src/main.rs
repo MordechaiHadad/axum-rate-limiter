@@ -47,7 +47,10 @@ async fn main() {
         let interval = Duration::from_secs(60);
         loop {
             tokio::time::sleep(interval).await;
-            info!("rate limiting storage size: {}", limiter_len(&limiter_cleanup).await);
+            info!(
+                "rate limiting storage size: {}",
+                limiter_len(&limiter_cleanup).await
+            );
             limiter_cleanup_task(&limiter_cleanup).await;
         }
     });

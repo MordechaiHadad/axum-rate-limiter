@@ -7,7 +7,6 @@ pub mod surrealdb;
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    body::Body,
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
     middleware::Next,
@@ -69,6 +68,7 @@ pub async fn ai_rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    use axum::body::Body; 
     let client_ip = extract_ip_with_fallback(&req);
     debug!("client_ip = {}", client_ip);
 
@@ -76,15 +76,22 @@ pub async fn ai_rate_limit_middleware(
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let model = redis::extract_model(&body_bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let usage = redis::extract_ai_usage(&body_bytes).map_err(|error| match error {
+        redis::AiRequestError::InvalidJson(_) | redis::AiRequestError::UnsupportedModel(_) => {
+            StatusCode::BAD_REQUEST
+        }
+        redis::AiRequestError::ChargeOverflow | redis::AiRequestError::Tokenizer(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
 
-    if limiter.allow(&client_ip, &model).await {
-        trace!("allowed {} for model {}", client_ip, model);
+    if limiter.allow(&client_ip, &usage).await {
+        trace!("allowed {} for model {}", client_ip, usage.model);
         let req = Request::from_parts(parts, Body::from(body_bytes));
         return Ok(next.run(req).await);
     }
 
-    trace!("rate limited {} for model {}", client_ip, model);
+    trace!("rate limited {} for model {}", client_ip, usage.model);
     Err(StatusCode::TOO_MANY_REQUESTS)
 }
 
