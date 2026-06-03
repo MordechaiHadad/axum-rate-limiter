@@ -6,7 +6,7 @@ use tracing::{debug, trace};
 use crate::{RATE_LIMIT_MAX, RateLimiter};
 
 const DEFAULT_WINDOW_SECONDS: i32 = 60;
-const AI_WINDOW_SECONDS: i32 = 600;
+const AI_WINDOW_SECONDS: i32 = 120;
 const QUOTA_UNITS_PER_DOLLAR: i64 = 500;
 const TOTAL_AI_QUOTA_UNITS: i64 = QUOTA_UNITS_PER_DOLLAR * 10;
 const GPT_4_COST_UNITS_PER_TOKEN: i64 = 1;
